@@ -1,0 +1,39 @@
+# -------------------------------------------------------------------
+# Data and model artefacts: large and/or regenerable -> never commit.
+# We keep the empty directories via .gitkeep files (see the ! rules).
+# -------------------------------------------------------------------
+data/raw/*
+data/processed/*
+models_saved/*
+output/*
+!**/.gitkeep
+
+# -------------------------------------------------------------------
+# Credentials: MUST NOT be committed. MARS/CDS credentials live in the
+# user's home directory (~/.ecmwfapirc, ~/.cdsapirc), never in the repo,
+# but we guard against accidental local copies too.
+# -------------------------------------------------------------------
+.ecmwfapirc
+.cdsapirc
+*.key
+secrets.*
+
+# -------------------------------------------------------------------
+# Python
+# -------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ipynb_checkpoints/
+.pytest_cache/
+.mypy_cache/
+
+# -------------------------------------------------------------------
+# Environment / OS / editor
+# -------------------------------------------------------------------
+.env
+.venv/
+env/
+.DS_Store
+.vscode/
+*.swp

@@ -1,0 +1,49 @@
+# Conda environment for the NBP weather-signal project.
+#
+# Why conda (Miniconda) and not pip/pyenv:
+#   Reading ECMWF GRIB files requires `eccodes` (a C library) plus `cfgrib`.
+#   On Intel macOS Monterey these are painful to build from source under pip,
+#   but conda-forge ships prebuilt binaries that install cleanly. Everything
+#   below therefore comes from the conda-forge channel.
+#
+# Create with:   conda env create -f environment.yml
+# Activate with: conda activate nbp
+# Update with:   conda env update -f environment.yml --prune
+
+name: nbp
+
+channels:
+  - conda-forge
+
+dependencies:
+  # --- Language ---
+  # Python 3.11: best-supported by the scientific/geo binary stack on
+  # Intel macOS. 3.12+ wheels are still patchier for some geo packages.
+  - python=3.11
+
+  # --- Data handling / compute ---
+  - numpy
+  - pandas
+  - pyarrow          # Parquet read/write (our lightweight index storage)
+  - scipy
+
+  # --- NWP / GRIB / NetCDF stack ---
+  - eccodes          # C library for GRIB decoding (the reason we use conda)
+  - cfgrib           # xarray backend for GRIB
+  - xarray
+  - netcdf4
+  - ecmwf-api-client # MARS access (ERA5 + IFS operational)
+  - cdsapi           # Climate Data Store client (ERA5 fallback path)
+
+  # --- Machine learning ---
+  - scikit-learn>=1.4
+  - xgboost
+  - lightgbm
+
+  # --- Visualisation ---
+  - matplotlib
+
+  # --- Utilities ---
+  - python-dateutil
+  - pyyaml
+  - joblib
