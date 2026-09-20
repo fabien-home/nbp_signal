@@ -205,11 +205,20 @@ def add_roll_mask(df: pd.DataFrame) -> pd.DataFrame:
     """
     df = df.copy()
     year_month = df["date"].dt.to_period("M")
-    # rank 1 = last trading day of the month, 2 = penultimate, ...
+    # Rank trading days within each month by their actual presence (robust to
+    # holidays). rank 1 from the end = last trading day; rank 1 from the start =
+    # first trading day.
     rank_from_end = df.groupby(year_month)["date"].rank(
         method="first", ascending=False
     )
-    df["is_roll"] = rank_from_end <= ROLL_WINDOW_BDAYS
+    rank_from_start = df.groupby(year_month)["date"].rank(
+        method="first", ascending=True
+    )
+    # Roll window = last ROLL_WINDOW_BDAYS trading days AND the first trading day
+    # of each month. The last-2 cover the usual end-of-month roll; the first-day
+    # covers cases where expiry/holiday alignment shifts the observed switch onto
+    # the 1st (e.g. 2003-10-01).
+    df["is_roll"] = (rank_from_end <= ROLL_WINDOW_BDAYS) | (rank_from_start <= 1)
     df.loc[df["is_roll"], "target"] = np.nan
     return df
 
@@ -241,7 +250,7 @@ def summarise(df: pd.DataFrame) -> None:
     # Contract-roll masking: how many labels we invalidated as roll artefacts.
     n_roll = int(df["is_roll"].sum()) if "is_roll" in df.columns else 0
     print(f"Roll-masked days    : {n_roll} (target nulled; last "
-          f"{ROLL_WINDOW_BDAYS} trading days each month)")
+          f"{ROLL_WINDOW_BDAYS} + first 1 trading days each month)")
 
     # Outlier flags for inspection, EXCLUDING roll days. What remains should be
     # genuine large market moves (e.g. crisis days), not roll jumps - this is
