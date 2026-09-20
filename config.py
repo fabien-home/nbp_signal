@@ -28,6 +28,17 @@ PROCESSED_DIR = DATA_DIR / "processed"  # cleaned indices as Parquet (gitignored
 MODELS_DIR = PROJECT_ROOT / "models_saved"
 OUTPUT_DIR = PROJECT_ROOT / "output"
 
+# NBP price data: raw daily CSV in and cleaned Parquet out.
+RAW_NBP_FILE = RAW_DIR / "nbp_daily.csv"
+PROCESSED_NBP_FILE = PROCESSED_DIR / "nbp_daily.parquet"
+
+# Optional start date for the *usable* price series. The raw export goes back
+# to 1997, but early NBP was thinly traded (flat OHLC, zero volume), which is
+# poor training material. Set to a date string (e.g. "2005-01-01") to trim, or
+# None to keep the full history. This is a configurable choice, not a hardcode:
+# Phase 2's summary output lets us decide the right cut before modelling.
+NBP_HISTORY_START = None
+
 # ---------------------------------------------------------------------------
 # Geographic domain: NW Europe (UK + North Sea + near-continent).
 # Chosen so we capture the continental / German-wind drivers that move TTF
