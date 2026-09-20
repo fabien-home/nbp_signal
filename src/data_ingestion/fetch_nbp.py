@@ -58,6 +58,14 @@ COLUMN_ALIASES = {
 # cases. 0.25 = 25% one-day move.
 ROLL_FLAG_RETURN_THRESHOLD = 0.25
 
+# Contract-roll window. ICE NBP front-month trading ceases ~2 business days
+# before the delivery month begins, so a raw/unadjusted continuous front-month
+# series (like TradingView's GWM1!) rolls to the next contract within the last
+# ~2 trading days of each calendar month. A day-over-day return computed ACROSS
+# that roll compares two DIFFERENT contracts, so it is an artefact rather than a
+# real price move. We therefore null the directional target on those days.
+ROLL_WINDOW_BDAYS = 2
+
 
 def _canonicalise_columns(df: pd.DataFrame) -> pd.DataFrame:
     """Rename incoming columns to our canonical names using COLUMN_ALIASES.
@@ -184,6 +192,28 @@ def add_target(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def add_roll_mask(df: pd.DataFrame) -> pd.DataFrame:
+    """Flag contract-roll days and invalidate their directional target.
+
+    We identify the last ``ROLL_WINDOW_BDAYS`` trading days of each calendar
+    month by ranking the trading days ACTUALLY PRESENT (not fixed calendar
+    dates) from the end - this is robust to holidays and missing days. On those
+    days the front-month contract identity changes, so the day-over-day return
+    is a roll artefact, not a real move. We keep the row (weather features are
+    still valid) but set its target to NaN so it is excluded from training and
+    evaluation. Genuine crisis moves happen mid-month and are preserved.
+    """
+    df = df.copy()
+    year_month = df["date"].dt.to_period("M")
+    # rank 1 = last trading day of the month, 2 = penultimate, ...
+    rank_from_end = df.groupby(year_month)["date"].rank(
+        method="first", ascending=False
+    )
+    df["is_roll"] = rank_from_end <= ROLL_WINDOW_BDAYS
+    df.loc[df["is_roll"], "target"] = np.nan
+    return df
+
+
 def summarise(df: pd.DataFrame) -> None:
     """Print a plain-text summary: coverage, gaps, weekends, flags, balance."""
     print("=" * 62)
@@ -208,11 +238,20 @@ def summarise(df: pd.DataFrame) -> None:
         for _, r in worst.iterrows():
             print(f"    {r['date'].date()}  ({int(r['gap_days'])} days since prev)")
 
-    # Roll / outlier flags for inspection.
-    flagged = df[df["roll_flag"]]
-    print(f"Flagged moves (|ret|>{ROLL_FLAG_RETURN_THRESHOLD:.0%}): {len(flagged)}")
+    # Contract-roll masking: how many labels we invalidated as roll artefacts.
+    n_roll = int(df["is_roll"].sum()) if "is_roll" in df.columns else 0
+    print(f"Roll-masked days    : {n_roll} (target nulled; last "
+          f"{ROLL_WINDOW_BDAYS} trading days each month)")
+
+    # Outlier flags for inspection, EXCLUDING roll days. What remains should be
+    # genuine large market moves (e.g. crisis days), not roll jumps - this is
+    # how we VALIDATE that the roll mask caught the artefacts.
+    non_roll = df["roll_flag"] & ~df.get("is_roll", False)
+    flagged = df[non_roll]
+    print(f"Flagged non-roll moves (|ret|>{ROLL_FLAG_RETURN_THRESHOLD:.0%}): {len(flagged)}")
     if len(flagged):
-        for _, r in flagged.nlargest(5, "ret", keep="all").iterrows():
+        top = flagged.loc[flagged["ret"].abs().sort_values(ascending=False).index]
+        for _, r in top.head(5).iterrows():
             print(f"    {r['date'].date()}  ret={r['ret']:+.1%}  close={r['close']:.2f}")
 
     # Class balance overall and in the heating season (the modelled window).
@@ -240,10 +279,12 @@ def save_plot(df: pd.DataFrame, path: Path) -> None:
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(11, 7))
 
     ax1.plot(df["date"], df["close"], lw=0.8, color="tab:blue")
-    flagged = df[df["roll_flag"]]
+    # Highlight only GENUINE (non-roll) large moves, so roll jumps do not clutter
+    # the picture and real crisis days stand out.
+    flagged = df[df["roll_flag"] & ~df.get("is_roll", False)]
     if len(flagged):
         ax1.scatter(flagged["date"], flagged["close"], s=18, color="tab:red",
-                    zorder=5, label=f"flagged |ret|>{ROLL_FLAG_RETURN_THRESHOLD:.0%}")
+                    zorder=5, label=f"non-roll |ret|>{ROLL_FLAG_RETURN_THRESHOLD:.0%}")
         ax1.legend(loc="upper left", fontsize=8)
     ax1.set_title("NBP front-month close")
     ax1.set_ylabel("price")
@@ -264,6 +305,7 @@ def process(input_path: Path, output_parquet: Path, plot_path: Path) -> pd.DataF
     df = load_raw_csv(input_path)
     df = clean_prices(df)
     df = add_target(df)
+    df = add_roll_mask(df)
 
     summarise(df)
     save_plot(df, plot_path)
