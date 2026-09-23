@@ -66,6 +66,21 @@ HDD_BASE_TEMP_C = 15.5
 CLIMATOLOGY_START_YEAR = 1991
 CLIMATOLOGY_END_YEAR = 2020
 
+# Day-of-year climatology is smoothed with a centred window (days) so the
+# reference curve is not noisy from year-to-year sampling. 15 days is a common,
+# gentle choice.
+CLIMATOLOGY_SMOOTH_DAYS = 15
+
+# Wind-turbine power-curve reference wind speeds (m/s), used to convert a 100 m
+# wind speed into a normalised generation fraction. Generic modern-turbine
+# values: below cut-in nothing spins; power rises steeply (~cubically) to the
+# rated speed; it is capped at rated output up to cut-out; above cut-out the
+# turbine shuts down for safety. This nonlinearity is why we transform wind
+# SPEED into generation rather than feeding raw speed to the model.
+WIND_CUT_IN_MS = 3.0
+WIND_RATED_MS = 12.0
+WIND_CUT_OUT_MS = 25.0
+
 # Heating season: the signal is active September-April inclusive. Outside
 # this window the daily script reports "no signal - outside heating season".
 HEATING_SEASON_MONTHS = {9, 10, 11, 12, 1, 2, 3, 4}
