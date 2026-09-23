@@ -17,6 +17,13 @@ We retrieve INSTANTANEOUS ANALYSIS fields (type=an) at 00/06/12/18 UTC:
 Four times a day is a deliberate, RAM-friendly compromise: enough to build a
 sensible daily index without pulling hourly ERA5 (~4x the data) on an 8 GB Mac.
 
+GRIB EDITIONS. ERA5 archives table-128 params (2t, tcc) as GRIB edition 1 and
+table-228 params (100u, 100v) as GRIB edition 2. A single MARS request that
+mixes editions fails with "Ambiguous : grib could be GRIB EDITION 1 or 2", so
+we retrieve each edition group in its own request and concatenate the GRIB
+message streams into one file per year (GRIB files concatenate by simple byte
+append, and cfgrib reads the combined stream without issue).
+
 SOLAR (ssrd) IS DEFERRED. Surface solar radiation is an ACCUMULATED FORECAST
 field in ERA5 (type=fc, not type=an), so it cannot ride along in this clean
 analysis request - it needs a separate forecast stream and de-accumulation.
@@ -34,6 +41,7 @@ Usage (run on the Mac, inside the `nbp` conda env, from the repo root):
 from __future__ import annotations
 
 import argparse
+import shutil
 import sys
 from datetime import datetime
 
@@ -58,8 +66,15 @@ MARS_PARAM_IDS = {
     "ssrd": "169",
 }
 
-# Instantaneous analysis fields we retrieve in the type=an request.
-ANALYSIS_VARS = ["2t", "100u", "100v", "tcc"]
+# Instantaneous analysis fields, grouped by GRIB edition. Each group is fetched
+# in its own MARS request (mixing editions in one request is rejected), then the
+# resulting GRIB streams are concatenated into a single file per year.
+ANALYSIS_VAR_GROUPS = [
+    ["2t", "tcc"],      # GRIB edition 1 (parameter table 128)
+    ["100u", "100v"],   # GRIB edition 2 (parameter table 228)
+]
+# Flat list, for logging / reference.
+ANALYSIS_VARS = [v for group in ANALYSIS_VAR_GROUPS for v in group]
 
 # Accumulated forecast fields we deliberately skip in v1 (see module docstring).
 DEFERRED_VARS = ["ssrd"]
@@ -74,13 +89,15 @@ def _year_target_path(year: int, sample: bool):
     return config.RAW_DIR / f"era5_{year}{suffix}.grib"
 
 
-def build_era5_request(year: int, sample: bool) -> dict:
+def build_era5_request(year: int, sample: bool, variables) -> dict:
     """Build the MARS request dict for one year of ERA5 analysis fields.
 
-    When `sample` is True we fetch only January of that year - a quick, cheap
-    way to prove the request and credentials work before the full pull.
+    `variables` is the subset of short names for this request (a single GRIB
+    edition group). When `sample` is True we fetch only January of that year - a
+    quick, cheap way to prove the request and credentials work before the full
+    pull.
     """
-    params = "/".join(MARS_PARAM_IDS[v] for v in ANALYSIS_VARS)
+    params = "/".join(MARS_PARAM_IDS[v] for v in variables)
 
     if sample:
         date = f"{year}-01-01/to/{year}-01-31"
@@ -116,9 +133,22 @@ def fetch_era5_year(server, year: int, sample: bool, overwrite: bool) -> bool:
         print(f"  [skip] {target.name} already exists ({target.stat().st_size / 1e6:.0f} MB)")
         return False
 
-    request = build_era5_request(year, sample)
-    print(f"  [get ] {target.name}  ({request['date']})")
-    server.execute(request, str(target))
+    # One MARS request per GRIB-edition group, written to temporary part files,
+    # then concatenated into the single per-year target.
+    part_paths = []
+    for i, variables in enumerate(ANALYSIS_VAR_GROUPS, start=1):
+        part = target.with_name(f"{target.stem}.part{i}.grib")
+        request = build_era5_request(year, sample, variables)
+        print(f"  [get ] {target.name}  part {i} {variables}  ({request['date']})")
+        server.execute(request, str(part))
+        part_paths.append(part)
+
+    with open(target, "wb") as out:
+        for part in part_paths:
+            with open(part, "rb") as f:
+                shutil.copyfileobj(f, out)
+            part.unlink()
+
     print(f"  [done] {target.name}  ({target.stat().st_size / 1e6:.0f} MB)")
     return True
 
